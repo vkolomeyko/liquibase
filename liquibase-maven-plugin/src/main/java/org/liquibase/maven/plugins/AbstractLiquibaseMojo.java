@@ -1,6 +1,9 @@
 package org.liquibase.maven.plugins;
 
-import liquibase.*;
+import liquibase.GlobalConfiguration;
+import liquibase.Liquibase;
+import liquibase.Scope;
+import liquibase.ThreadLocalScopeManager;
 import liquibase.changelog.visitor.ChangeExecListener;
 import liquibase.changelog.visitor.DefaultChangeExecListener;
 import liquibase.command.core.helpers.DbUrlConnectionCommandStep;
@@ -24,15 +27,17 @@ import liquibase.resource.SearchPathResourceAccessor;
 import liquibase.util.FileUtil;
 import liquibase.util.StringUtil;
 import org.apache.maven.artifact.manager.WagonManager;
-import org.apache.maven.plugin.AbstractMojo;
-import org.apache.maven.plugin.MojoExecutionException;
-import org.apache.maven.plugin.MojoFailureException;
+import org.apache.maven.execution.MavenSession;
+import org.apache.maven.plugin.*;
 import org.apache.maven.plugin.descriptor.MojoDescriptor;
 import org.apache.maven.plugin.descriptor.Parameter;
 import org.apache.maven.plugin.descriptor.PluginDescriptor;
 import org.apache.maven.plugin.logging.Log;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.wagon.authentication.AuthenticationInfo;
+import org.codehaus.plexus.component.configurator.expression.ExpressionEvaluationException;
+import org.codehaus.plexus.configuration.PlexusConfiguration;
+import org.codehaus.plexus.configuration.xml.XmlPlexusConfiguration;
 import org.liquibase.maven.property.PropertyElement;
 
 import javax.xml.bind.annotation.XmlSchema;
@@ -48,6 +53,8 @@ import java.util.logging.Handler;
 
 import static java.util.ResourceBundle.getBundle;
 import static liquibase.configuration.LiquibaseConfiguration.REGISTERED_VALUE_PROVIDERS_KEY;
+import static liquibase.util.ObjectUtil.defaultIfNull;
+import static org.apache.commons.lang3.StringUtils.defaultIfBlank;
 
 /**
  * A base class for providing Liquibase {@link liquibase.Liquibase} functionality.
@@ -285,6 +292,21 @@ public abstract class AbstractLiquibaseMojo extends AbstractMojo {
      * @readonly
      */
     protected MavenProject project;
+
+
+    /**
+     * @parameter property="session"
+     * @required
+     * @readonly
+     */
+    protected MavenSession session;
+
+    /**
+     * @parameter property="mojoExecution"
+     * @required
+     * @readonly
+     */
+    protected MojoExecution mojoExecution;
 
     /**
      * Specifies whether to skip running Liquibase.
@@ -694,6 +716,22 @@ public abstract class AbstractLiquibaseMojo extends AbstractMojo {
 
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
+        PluginParameterExpressionEvaluator expressionEvaluator = new PluginParameterExpressionEvaluator(session, mojoExecution);
+        PlexusConfiguration pomConfiguration = new XmlPlexusConfiguration(mojoExecution.getConfiguration());
+
+        for (PlexusConfiguration plexusConfiguration : pomConfiguration.getChildren()) {
+            String name = plexusConfiguration.getName();
+            String value = plexusConfiguration.getValue();
+            String defaultValue = plexusConfiguration.getAttribute("default-value");
+            try {
+                String evaluated = defaultIfNull(expressionEvaluator.evaluate(defaultIfBlank(value, defaultValue)), "").toString();
+                System.out.println(name + " -> " + defaultIfBlank(evaluated, defaultValue));
+            } catch (ExpressionEvaluationException e) {
+                e.printStackTrace();
+            }
+        }
+
+
         if (StringUtil.trimToNull(logging) != null) {
             getLog().error("The liquibase-maven-plugin now manages logging via the standard maven logging config, not the 'logging' configuration. Use the -e, -X or -q flags or see https://maven.apache.org/maven-logging.html");
         }
