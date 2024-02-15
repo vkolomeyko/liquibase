@@ -318,7 +318,7 @@ public class LiquibaseCommandLine {
         } finally {
             if (LiquibaseCommandLineConfiguration.SUPPORT_BUNDLE.getCurrentValue()) {
                 try {
-                    File f = new File("test.zip");
+                    File f = new File("bundle.zip");
                     ZipOutputStream out = null;
                     out = new ZipOutputStream(new FileOutputStream(f));
                     ZipEntry e = new ZipEntry("logs.txt");
@@ -345,15 +345,17 @@ public class LiquibaseCommandLine {
         File[] listOfFiles = folder.listFiles();
 
         for (File file : listOfFiles) {
-            try {
-                ZipEntry e = new ZipEntry(file.getName());
-                out.putNextEntry(e);
+            if (!file.getName().equals("bundle.zip")) {
+                try {
+                    ZipEntry e = new ZipEntry(file.getName());
+                    out.putNextEntry(e);
 
-                byte[] fileContent = Files.readAllBytes(file.toPath());
-                out.write(fileContent);
-                out.closeEntry();
-            } catch (Exception e) {
-                Scope.getCurrentScope().getLog(getClass()).severe("Failed to write file " + file.getName() + " to support bundle", e);
+                    byte[] fileContent = Files.readAllBytes(file.toPath());
+                    out.write(fileContent);
+                    out.closeEntry();
+                } catch (Exception e) {
+                    Scope.getCurrentScope().getLog(getClass()).severe("Failed to write file " + file.getName() + " to support bundle", e);
+                }
             }
         }
     }
