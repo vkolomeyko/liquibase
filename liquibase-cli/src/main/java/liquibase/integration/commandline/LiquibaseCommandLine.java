@@ -39,25 +39,24 @@ import picocli.CommandLine;
 import java.io.*;
 import java.lang.reflect.InvocationTargetException;
 import java.net.MalformedURLException;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.time.Duration;
 import java.util.*;
-import java.util.jar.JarFile;
-import java.util.jar.Manifest;
 import java.util.logging.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static java.util.ResourceBundle.getBundle;
 import static liquibase.configuration.LiquibaseConfiguration.REGISTERED_VALUE_PROVIDERS_KEY;
-import static liquibase.integration.commandline.LiquibaseLauncherSettings.LiquibaseLauncherSetting.LIQUIBASE_HOME;
-import static liquibase.integration.commandline.LiquibaseLauncherSettings.getSetting;
 import static liquibase.integration.commandline.VersionUtils.*;
 import static liquibase.util.SystemUtil.isWindows;
 
@@ -83,6 +82,8 @@ public class LiquibaseCommandLine {
     private Handler fileHandler;
 
     private final ResourceBundle coreBundle = getBundle("liquibase/i18n/liquibase-core");
+
+    public static final ByteArrayOutputStream logs = new ByteArrayOutputStream();
 
     /**
      * Pico's defaultFactory does a lot of reflection, checking for classes we know we don't have.
@@ -227,88 +228,192 @@ public class LiquibaseCommandLine {
     }
 
     protected int handleException(Throwable exception) {
-        Throwable cause = exception;
+        try {
+            shoveDebugStuffInLogs();
 
-        String uiMessage = "";
-        while (cause != null) {
-            String newMessage = StringUtil.trimToNull(cleanExceptionMessage(cause.getMessage()));
-            if (newMessage != null) {
-                if (!uiMessage.contains(newMessage)) {
-                    if (!uiMessage.equals("")) {
-                        uiMessage += System.lineSeparator() + "  - Caused by: ";
+            Throwable cause = exception;
+
+            String uiMessage = "";
+            while (cause != null) {
+                String newMessage = StringUtil.trimToNull(cleanExceptionMessage(cause.getMessage()));
+                if (newMessage != null) {
+                    if (!uiMessage.contains(newMessage)) {
+                        if (!uiMessage.equals("")) {
+                            uiMessage += System.lineSeparator() + "  - Caused by: ";
+                        }
+                        uiMessage += newMessage;
                     }
-                    uiMessage += newMessage;
                 }
+
+                cause = cause.getCause();
             }
 
-            cause = cause.getCause();
-        }
+            if (StringUtil.isEmpty(uiMessage)) {
+                uiMessage = exception.getClass().getName();
+            }
 
-        if (StringUtil.isEmpty(uiMessage)) {
-            uiMessage = exception.getClass().getName();
-        }
+            //
+            // For LiquibaseException, we can control the logging level
+            //
+            Level level = determineLogLevel(exception);
 
-        //
-        // For LiquibaseException, we can control the logging level
-        //
-        Level level = determineLogLevel(exception);
+            Scope.getCurrentScope().getLog(getClass()).log(level, uiMessage, exception);
 
-        Scope.getCurrentScope().getLog(getClass()).log(level, uiMessage, exception);
+            boolean printUsage = false;
+            try (final StringWriter suggestionWriter = new StringWriter();
+                 PrintWriter suggestionsPrintWriter = new PrintWriter(suggestionWriter)) {
+                if (exception instanceof CommandLine.ParameterException) {
+                    if (exception instanceof CommandLine.UnmatchedArgumentException) {
+                        System.err.println("Unexpected argument(s): " + StringUtil.join(((CommandLine.UnmatchedArgumentException) exception).getUnmatched(), ", "));
+                    } else {
+                        System.err.println("Error parsing command line: " + uiMessage);
+                    }
+                    CommandLine.UnmatchedArgumentException.printSuggestions((CommandLine.ParameterException) exception, suggestionsPrintWriter);
 
-        boolean printUsage = false;
-        try (final StringWriter suggestionWriter = new StringWriter();
-             PrintWriter suggestionsPrintWriter = new PrintWriter(suggestionWriter)) {
-            if (exception instanceof CommandLine.ParameterException) {
-                if (exception instanceof CommandLine.UnmatchedArgumentException) {
-                    System.err.println("Unexpected argument(s): " + StringUtil.join(((CommandLine.UnmatchedArgumentException) exception).getUnmatched(), ", "));
-                } else {
+                    printUsage = true;
+                } else if (exception instanceof IllegalArgumentException
+                        || exception instanceof CommandValidationException
+                        || exception instanceof CommandLineParsingException) {
                     System.err.println("Error parsing command line: " + uiMessage);
-                }
-                CommandLine.UnmatchedArgumentException.printSuggestions((CommandLine.ParameterException) exception, suggestionsPrintWriter);
-
-                printUsage = true;
-            } else if (exception instanceof IllegalArgumentException
-                    || exception instanceof CommandValidationException
-                    || exception instanceof CommandLineParsingException) {
-                System.err.println("Error parsing command line: " + uiMessage);
-                printUsage = true;
-            } else if (exception.getCause() != null && exception.getCause() instanceof CommandFailedException) {
-                System.err.println(uiMessage);
-            } else {
-                System.err.println("\nUnexpected error running Liquibase: " + uiMessage);
-                System.err.println();
-
-                if (Level.OFF.equals(this.configuredLogLevel)) {
-                    System.err.println("For more information, please use the --log-level flag");
+                    printUsage = true;
+                } else if (exception.getCause() != null && exception.getCause() instanceof CommandFailedException) {
+                    System.err.println(uiMessage);
                 } else {
-                    if (LiquibaseCommandLineConfiguration.LOG_FILE.getCurrentValue() == null) {
-                        exception.printStackTrace(System.err);
+                    System.err.println("\nUnexpected error running Liquibase: " + uiMessage);
+                    System.err.println();
+
+                    if (Level.OFF.equals(this.configuredLogLevel)) {
+                        System.err.println("For more information, please use the --log-level flag");
+                    } else {
+                        if (LiquibaseCommandLineConfiguration.LOG_FILE.getCurrentValue() == null) {
+                            exception.printStackTrace(System.err);
+                        }
                     }
                 }
+
+                if (printUsage) {
+                    System.err.println();
+                    System.err.println("For detailed help, try 'liquibase --help' or 'liquibase <command-name> --help'");
+                }
+
+                suggestionsPrintWriter.flush();
+                final String suggestions = suggestionWriter.toString();
+                if (suggestions.length() > 0) {
+                    System.err.println();
+                    System.err.println(suggestions);
+                }
+            } catch (IOException e) {
+                Scope.getCurrentScope().getLog(getClass()).warning("Error closing stream: " + e.getMessage(), e);
+            }
+            Throwable exitCodeException = ExceptionUtil.findExceptionInCauseChain(exception, ExitCodeException.class);
+            if (exitCodeException != null) {
+                Integer exitCode = ((ExitCodeException) exitCodeException.getCause()).getExitCode();
+                if (exitCode != null) {
+                    return exitCode;
+                }
+            }
+            return 1;
+        } catch (IOException | URISyntaxException e) {
+            throw new RuntimeException(e);
+        } finally {
+            if (LiquibaseCommandLineConfiguration.SUPPORT_BUNDLE.getCurrentValue()) {
+                try {
+                    File f = new File("test.zip");
+                    ZipOutputStream out = null;
+                    out = new ZipOutputStream(new FileOutputStream(f));
+                    ZipEntry e = new ZipEntry("logs.txt");
+                    out.putNextEntry(e);
+
+                    byte[] data = logs.toString().getBytes();
+                    out.write(data, 0, data.length);
+                    out.closeEntry();
+
+                    addOtherFilesToZip(out);
+
+                    out.close();
+                } catch (Exception e) {
+                    Scope.getCurrentScope().getLog(getClass()).severe("Failed to generate support bundle", e);
+                }
+
             }
 
-            if (printUsage) {
-                System.err.println();
-                System.err.println("For detailed help, try 'liquibase --help' or 'liquibase <command-name> --help'");
-            }
+        }
+    }
 
-            suggestionsPrintWriter.flush();
-            final String suggestions = suggestionWriter.toString();
-            if (suggestions.length() > 0) {
-                System.err.println();
-                System.err.println(suggestions);
+    private void addOtherFilesToZip(ZipOutputStream out) {
+        File folder = new File(".");
+        File[] listOfFiles = folder.listFiles();
+
+        for (File file : listOfFiles) {
+            try {
+                ZipEntry e = new ZipEntry(file.getName());
+                out.putNextEntry(e);
+
+                byte[] fileContent = Files.readAllBytes(file.toPath());
+                out.write(fileContent);
+                out.closeEntry();
+            } catch (Exception e) {
+                Scope.getCurrentScope().getLog(getClass()).severe("Failed to write file " + file.getName() + " to support bundle", e);
             }
-        } catch (IOException e) {
-            Scope.getCurrentScope().getLog(getClass()).warning("Error closing stream: " + e.getMessage(), e);
         }
-        Throwable exitCodeException = ExceptionUtil.findExceptionInCauseChain(exception, ExitCodeException.class);
-        if (exitCodeException != null) {
-            Integer exitCode = ((ExitCodeException) exitCodeException.getCause()).getExitCode();
-            if (exitCode != null) {
-                return exitCode;
-            }
-        }
-        return 1;
+    }
+
+    private void shoveDebugStuffInLogs() throws IOException, URISyntaxException {
+        final Path workingDirectory = Paths.get(".").toAbsolutePath();
+        List<String> libraries = listLibraries(getLibraryInfoMap(), getLiquibaseHomePath(workingDirectory), workingDirectory, null);
+        Scope.getCurrentScope().getLog(getClass()).fine("Extensions: "+ StringUtil.join(libraries, ", "));
+        internetSpeedToLogs();
+        jvmInfoToLogs();
+    }
+
+    private void internetSpeedToLogs() {
+        // todo
+    }
+
+    private void jvmInfoToLogs() {
+        // Get JVM version
+        String javaVersion = System.getProperty("java.version");
+        Scope.getCurrentScope().getLog(getClass()).fine(("Java Version: " + javaVersion));
+
+// Get JVM vendor
+        String javaVendor = System.getProperty("java.vendor");
+        Scope.getCurrentScope().getLog(getClass()).fine(("Java Vendor: " + javaVendor));
+
+// Get JVM name
+        String jvmName = System.getProperty("java.vm.name");
+        Scope.getCurrentScope().getLog(getClass()).fine(("JVM Name: " + jvmName));
+
+// Get JVM version information
+        String jvmVersion = System.getProperty("java.vm.version");
+        Scope.getCurrentScope().getLog(getClass()).fine(("JVM Version: " + jvmVersion));
+
+// Get JVM implementation information
+        String jvmInfo = System.getProperty("java.vm.info");
+        Scope.getCurrentScope().getLog(getClass()).fine(("JVM Info: " + jvmInfo));
+
+// Get JVM architecture
+        String jvmArch = System.getProperty("os.arch");
+        Scope.getCurrentScope().getLog(getClass()).fine(("JVM Architecture: " + jvmArch));
+
+// Get JVM operating system
+        String osName = System.getProperty("os.name");
+        Scope.getCurrentScope().getLog(getClass()).fine(("Operating System: " + osName));
+
+        // Get JVM available processors
+        int availableProcessors = Runtime.getRuntime().availableProcessors();
+        Scope.getCurrentScope().getLog(getClass()).fine(("Available Processors: " + availableProcessors));
+
+        // Get JVM total memory
+        long totalMemory = Runtime.getRuntime().totalMemory();
+        Scope.getCurrentScope().getLog(getClass()).fine(("Total Memory: " + totalMemory + " bytes"));
+
+        // Get JVM free memory
+        long freeMemory = Runtime.getRuntime().freeMemory();
+        Scope.getCurrentScope().getLog(getClass()).fine(("Free Memory: " + freeMemory + " bytes"));
+
+        // Get JVM maximum memory
+        long maxMemory = Runtime.getRuntime().maxMemory();
+        Scope.getCurrentScope().getLog(getClass()).fine(("Max Memory: " + maxMemory + " bytes"));
     }
 
     //
@@ -792,6 +897,11 @@ public class LiquibaseCommandLine {
             cliLogLevel = Level.OFF;
         }
 
+        StreamHandler debugHandler = new StreamHandler(logs, new SimpleFormatter());
+        JavaLogService.setFormatterOnHandler(logService, debugHandler);
+        rootLogger.addHandler(debugHandler);
+        debugHandler.setLevel(Level.ALL);
+
         final String configuredChannels = LiquibaseCommandLineConfiguration.LOG_CHANNELS.getCurrentValue();
         List<String> channels;
         if (configuredChannels.equalsIgnoreCase("all")) {
@@ -810,6 +920,8 @@ public class LiquibaseCommandLine {
             }
             if (fileLogLevelOverride != null) {
                 java.util.logging.Logger.getLogger(channel).setLevel(fileLogLevelOverride);
+            } else if (LiquibaseCommandLineConfiguration.SUPPORT_BUNDLE.getCurrentValue()) {
+                java.util.logging.Logger.getLogger(channel).setLevel(Level.ALL);
             } else {
                 java.util.logging.Logger.getLogger(channel).setLevel(logLevel);
             }

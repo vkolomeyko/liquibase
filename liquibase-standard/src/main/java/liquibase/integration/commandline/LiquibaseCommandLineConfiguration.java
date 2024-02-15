@@ -35,6 +35,7 @@ public class LiquibaseCommandLineConfiguration implements AutoloadedConfiguratio
     public static final ConfigurationDefinition<Boolean> SHOW_HIDDEN_ARGS;
     public static final ConfigurationDefinition<Boolean> INCLUDE_MATCHING_TAG_IN_ROLLBACK_OLDEST;
     public static final ConfigurationDefinition<Boolean> WORKAROUND_ORACLE_CLOB_CHARACTER_LIMIT;
+    public static final ConfigurationDefinition<Boolean> SUPPORT_BUNDLE;
 
     static {
         ConfigurationDefinition.Builder builder = new ConfigurationDefinition.Builder("liquibase");
@@ -141,6 +142,12 @@ public class LiquibaseCommandLineConfiguration implements AutoloadedConfiguratio
                 .setDefaultValue(true)
                 .setHidden(true)
                 .build();
+
+        SUPPORT_BUNDLE = builder.define("supportBundle", Boolean.class)
+                .setDescription("Turn on to capture support information for Liquibase and to transmit it automatically to Liquibase")
+                .setDefaultValue(false)
+                .build();
+        // todo turn off on individual files
    }
 
     public interface ArgumentConverter {
