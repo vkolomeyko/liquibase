@@ -377,7 +377,7 @@ public class LiquibaseCommandLine {
             // couldn't parse the response from Amazon S3.
             e.printStackTrace();
         }
-        Scope.getCurrentScope().getUI().sendMessage("Support bundle uploaded to S3");
+        Scope.getCurrentScope().getUI().sendMessage("Liquibase has received your support bundle and will reach out shortly with troubleshooting tips and solutions.");
     }
 
     private void addOtherFilesToZip(ZipOutputStream out) {
