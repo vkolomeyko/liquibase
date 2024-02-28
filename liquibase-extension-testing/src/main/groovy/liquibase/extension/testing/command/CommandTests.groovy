@@ -7,11 +7,7 @@ import liquibase.Scope
 import liquibase.change.Change
 import liquibase.changelog.ChangeLogHistoryService
 import liquibase.changelog.ChangeLogHistoryServiceFactory
-import liquibase.command.CommandArgumentDefinition
-import liquibase.command.CommandFactory
-import liquibase.command.CommandFailedException
-import liquibase.command.CommandResults
-import liquibase.command.CommandScope
+import liquibase.command.*
 import liquibase.command.core.InternalSnapshotCommandStep
 import liquibase.configuration.AbstractMapConfigurationValueProvider
 import liquibase.configuration.ConfigurationValueProvider
@@ -24,16 +20,10 @@ import liquibase.extension.testing.setup.*
 import liquibase.extension.testing.setup.SetupCleanResources.CleanupMode
 import liquibase.extension.testing.testsystem.DatabaseTestSystem
 import liquibase.extension.testing.testsystem.TestSystemFactory
-import liquibase.hub.HubService
-import liquibase.hub.core.MockHubService
 import liquibase.integration.commandline.LiquibaseCommandLineConfiguration
 import liquibase.integration.commandline.Main
 import liquibase.logging.core.BufferedLogService
-import liquibase.resource.ClassLoaderResourceAccessor
-import liquibase.resource.PathHandlerFactory
-import liquibase.resource.Resource
-import liquibase.resource.ResourceAccessor
-import liquibase.resource.SearchPathResourceAccessor
+import liquibase.resource.*
 import liquibase.ui.ConsoleUIService
 import liquibase.ui.InputHandler
 import liquibase.ui.UIService
@@ -46,6 +36,7 @@ import org.junit.Assume
 import org.junit.ComparisonFailure
 import spock.lang.Specification
 import spock.lang.Unroll
+import spock.util.environment.OperatingSystem
 
 import java.util.logging.Level
 import java.util.regex.Pattern
@@ -190,8 +181,15 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
         if (!foundOptional) {
             signature.println "  NONE"
         }
-        assert StringUtil.standardizeLineEndings(StringUtil.trimToEmpty(signature.toString())) ==
-               StringUtil.standardizeLineEndings(StringUtil.trimToEmpty(commandTestDefinition.signature))
+        def actualSignature = signature.toString()
+        def expectedSignature = commandTestDefinition.signature
+
+        if (expectedSignature == NOT_NULL) {
+            assert actualSignature != null: "The result is null"
+        } else {
+            assert StringUtil.standardizeLineEndings(StringUtil.trimToEmpty(actualSignature)) ==
+                    StringUtil.standardizeLineEndings(StringUtil.trimToEmpty(expectedSignature))
+        }
 
         where:
         commandTestDefinition << getCommandTestDefinitions()
@@ -225,7 +223,11 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
         }
 
         when:
-        final commandScope
+        if (testDef.supportedOs != null) {
+            def currentOs = OperatingSystem.getCurrent()
+            Assume.assumeTrue("The current operating system (" + currentOs.name + ") does not support this test.", testDef.supportedOs.contains(currentOs))
+        }
+        def commandScope
         try {
             commandScope = new CommandScope(testDef.commandTestDefinition.command as String[])
         }
@@ -310,7 +312,6 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
 
         def scopeSettings = [
                 (LiquibaseCommandLineConfiguration.LOG_LEVEL.getKey()): Level.INFO,
-                ("liquibase.plugin." + HubService.name)               : MockHubService,
                 (Scope.Attr.resourceAccessor.name())                  : testDef.resourceAccessor ?
                                                                             testDef.resourceAccessor : resourceAccessor,
                 (Scope.Attr.ui.name())                                : testDef.testUI ? testDef.testUI.initialize(uiOutputWriter, uiErrorWriter) :
@@ -378,6 +379,11 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
                 checkFileContent(testDef.expectedFileContent, "Command File Content")
                 checkDatabaseContent(testDef.expectedDatabaseContent, database, "Database snapshot content")
 
+                if (!testDef.expectedResult.isEmpty()) {
+                    def entrySet = testDef.expectedResult.entrySet()
+                    def oneEntry = entrySet.iterator().next()
+                    assert results.getResult(oneEntry.getKey()) == oneEntry.getValue()
+                }
                 if (!testDef.expectedResults.isEmpty()) {
                     for (def returnedResult : results.getResults().entrySet()) {
                         def expectedResult = testDef.expectedResults.get(returnedResult.getKey())
@@ -558,8 +564,8 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
         }
     }
 
-    private static File takeDatabaseSnapshot(Database database, String format) {
-        final ChangeLogHistoryService changeLogService = ChangeLogHistoryServiceFactory.getInstance().getChangeLogService(database)
+    static File takeDatabaseSnapshot(Database database, String format) {
+        final ChangeLogHistoryService changeLogService = Scope.getCurrentScope().getSingleton(ChangeLogHistoryServiceFactory.class).getChangeLogService(database)
         changeLogService.init()
         changeLogService.reset()
 
@@ -572,7 +578,7 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
         snapshotCommand
                 .addArgumentValue(InternalSnapshotCommandStep.DATABASE_ARG, database)
                 .addArgumentValue(InternalSnapshotCommandStep.SCHEMAS_ARG, schemas)
-                .addArgumentValue(InternalSnapshotCommandStep.SERIALIZER_FORMAT_ARG, "txt")
+                .addArgumentValue(InternalSnapshotCommandStep.SERIALIZER_FORMAT_ARG, format)
 
         Writer outputWriter = new FileWriter(tempFile)
         String result = InternalSnapshotCommandStep.printSnapshot(snapshotCommand, snapshotCommand.execute())
@@ -596,6 +602,7 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
                     contents = StreamUtil.readStreamAsString(resource.openInputStream())
                 } else {
                     contents = null
+                    throw new FileNotFoundException("File ${path} not found")
                 }
             }
 
@@ -616,6 +623,10 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
                     continue
                 }
 
+                if (expectedOutputCheck instanceof GString) {
+                    expectedOutputCheck = expectedOutputCheck.toString()
+                }
+
                 if (expectedOutputCheck instanceof String) {
                     if (!fullOutput.replaceAll(/\s+/," ")
                             .contains(StringUtil.standardizeLineEndings(StringUtil.trimToEmpty(expectedOutputCheck)).replaceAll(/\s+/," "))) {
@@ -624,7 +635,9 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
                 } else if (expectedOutputCheck instanceof Pattern) {
                     def matcher = expectedOutputCheck.matcher(fullOutput)
                     assert matcher.groupCount() == 0: "Unescaped parentheses in regexp /$expectedOutputCheck/"
-                    assert matcher.find(): "$outputDescription\n$fullOutput\n\nDoes not match regexp\n\n/$expectedOutputCheck/"
+                    if (!matcher.find()) {
+                        throw new ComparisonFailure("$outputDescription\n$fullOutput\n\nDoes not match regexp\n\n/$expectedOutputCheck/", expectedOutputCheck.toString(), fullOutput)
+                    }
                 } else if (expectedOutputCheck instanceof OutputCheck) {
                     try {
                         ((OutputCheck) expectedOutputCheck).check(fullOutput)
@@ -672,7 +685,7 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
                 throw new RuntimeException("${message}.\n\n!!------------- TEST EXECUTION FAILURE -------------!!\n" +
                         "\nIf you are running CommandTests directly through your IDE, make sure you are including the module with your 'test.groovy' files in your classpath.\n" +
                         "\nNOTE: For example, if you are running these tests in liquibase-core, use the liquibase-integration-tests module as the classpath in your run configuration.\n" +
-                        "\n!!--------------------------------------------------!!")
+                        "\n!!--------------------------------------------------!!", e)
 
             }
         }
@@ -809,6 +822,7 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
         private Map<String, ?> globalArguments = new HashMap<>()
 
         private String searchPath
+        private ArrayList<OperatingSystem> supportedOs
 
         /**
          * Arguments to command as key/value pairs
@@ -837,10 +851,15 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
         private File outputFile
 
         private Map<String, ?> expectedResults = new HashMap<>()
+        private Map<String, ?> expectedResult = new HashMap<>()
         private Class<Throwable> expectedException
         private Object expectedExceptionMessage
         private File expectFileToExist
         private File expectFileToNotExist
+
+        def setExpectedResult(Map<String, ?> expectedResult) {
+            this.expectedResult = expectedResult
+        }
 
         def setup(@DelegatesTo(TestSetupDefinition) Closure closure) {
             def setupDef = new TestSetupDefinition()
@@ -881,6 +900,10 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
 
         def setSearchPath(String searchPath) {
             this.searchPath = searchPath
+        }
+
+        def setSupportedOs(ArrayList<OperatingSystem> supportedOs) {
+            this.supportedOs = supportedOs;
         }
 
         def setExpectedFileContent(Map<String, Object> content) {
@@ -1114,21 +1137,7 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
         }
 
         void copyResource(String originalFile, String newFile, boolean writeInTargetTestClasses) {
-            URL url = Thread.currentThread().getContextClassLoader().getResource(originalFile)
-            File f = new File(url.toURI())
-            String contents = FileUtil.getContents(f)
-            File outputFile
-            if (writeInTargetTestClasses) {
-                outputFile = new File("target/test-classes", newFile)
-            } else {
-                outputFile = new File(newFile)
-            }
-            FileUtil.write(contents, outputFile)
-            println "Copied file " + originalFile + " to file " + newFile
-        }
-
-        void modifyChangeLogId(String originalFile, String newChangeLogId) {
-            this.setups.add(new SetupModifyChangelog(originalFile, newChangeLogId))
+            this.setups.add(new SetupCreateTempResources(originalFile, newFile, writeInTargetTestClasses ? "target/test-classes" : "."))
         }
 
         /**
@@ -1207,6 +1216,11 @@ Long Description: ${commandDefinition.getLongDescription() ?: "NOT SET"}
         String altUsername
         String altPassword
         Database altDatabase
+    }
+
+    public static String createRandomFilePath(String suffix) {
+        String rand = "target/test-classes/" + StringUtil.randomIdentifer(10) + "." + suffix
+        rand
     }
 
     interface OutputCheck {

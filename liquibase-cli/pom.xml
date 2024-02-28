@@ -12,17 +12,22 @@
 
     <artifactId>liquibase-cli</artifactId>
 
+    <properties>
+        <sonar.coverage.jacoco.xmlReportPaths>../target/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+    </properties>
+    
     <dependencies>
         <dependency>
             <groupId>org.liquibase</groupId>
-            <artifactId>liquibase-core</artifactId>
+            <artifactId>liquibase-standard</artifactId>
             <version>${project.version}</version>
         </dependency>
 
         <dependency>
             <groupId>info.picocli</groupId>
             <artifactId>picocli</artifactId>
-            <version>4.7.1</version>
+            <version>4.7.5</version>
+            <scope>compile</scope>
         </dependency>
     </dependencies>
 

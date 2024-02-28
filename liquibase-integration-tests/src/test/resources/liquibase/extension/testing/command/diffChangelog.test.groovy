@@ -1,15 +1,12 @@
 package liquibase.extension.testing.command
 
-import liquibase.change.AddColumnConfig
+
 import liquibase.change.ColumnConfig
 import liquibase.change.ConstraintsConfig
-import liquibase.change.core.AddColumnChange
 import liquibase.change.core.AddPrimaryKeyChange
 import liquibase.change.core.CreateTableChange
-import liquibase.exception.CommandExecutionException
 import liquibase.exception.CommandValidationException
 import liquibase.extension.testing.setup.SetupCleanResources
-import liquibase.structure.core.Column
 
 import java.util.regex.Pattern
 
@@ -21,9 +18,14 @@ Long Description: NOT SET
 Required Args:
   changelogFile (String) Changelog file to write results
   referenceUrl (String) The JDBC reference database connection URL
+    OBFUSCATED
   url (String) The JDBC database connection URL
     OBFUSCATED
 Optional Args:
+  author (String) Specifies the author for changesets in the generated changelog
+    Default: null
+  contextFilter (String) Changeset contexts to generate
+    Default: null
   defaultCatalogName (String) The default catalog name to use for the database connection
     Default: null
   defaultSchemaName (String) The default schema name to use for the database connection
@@ -44,6 +46,8 @@ Optional Args:
     Default: false
   includeTablespace (Boolean) Include the tablespace attribute in the changelog. Defaults to false.
     Default: false
+  labelFilter (String) Changeset labels to generate
+    Default: null
   outputSchemas (String) Output schemas names. This is a CSV list.
     Default: null
   password (String) Password to use to connect to the database
@@ -57,6 +61,10 @@ Optional Args:
     Default: null
   referenceDriverPropertiesFile (String) The JDBC driver properties file for the reference database
     Default: null
+  referenceLiquibaseCatalogName (String) Reference catalog to use for Liquibase objects
+    Default: null
+  referenceLiquibaseSchemaName (String) Reference schema to use for Liquibase objects
+    Default: null
   referencePassword (String) The reference database password
     Default: null
     OBFUSCATED
@@ -64,13 +72,21 @@ Optional Args:
     Default: null
   referenceUsername (String) The reference database username
     Default: null
+  replaceIfExistsTypes (String) Sets replaceIfExists="true" for changes of these types (supported types: createProcedure, createView)
+    Default: none
+  runOnChangeTypes (String) Sets runOnChange="true" for changesets containing solely changes of these types (e. g. createView, createProcedure, ...).
+    Default: none
   schemas (String) Schemas to include in diff
     Default: null
+  skipObjectSorting (Boolean) When true will skip object sorting. This can be useful on databases that have a lot of packages/procedures that are linked to each other
+    Default: false
+  useOrReplaceOption (Boolean) If true, will add 'OR REPLACE' option to the create view change object
+    Default: false
   username (String) Username to use to connect to the database
     Default: null
 """
 
-    run "Running diffChangelog against itself finds no differences", {
+    run "Running diffChangelog against itself finds no differences and don't generate an output file", {
         arguments = [
                 url              : { it.url },
                 username         : { it.username },
@@ -102,20 +118,12 @@ Optional Args:
 
         }
 
-        expectedFileContent = [
-                //
-                // Empty changelog contains no changeSet tags and an empty databaseChangeLog tag
-                //
-                "target/test-classes/diffChangelog-test.xml" :
-                        [
-                            CommandTests.assertNotContains("<changeSet"),
-                            Pattern.compile("^.*<?xml.*databaseChangeLog.*xsd./>", Pattern.MULTILINE|Pattern.DOTALL|Pattern.CASE_INSENSITIVE)
-                        ]
-        ]
+        expectFileToNotExist = new File("target/test-classes/diffChangelog-test.xml")
     }
 
-    run "Running diffChangelog should add changesets", {
+    run "Running diffChangelog should add changesets with specified author", {
         arguments = [
+                author           : "Test Author",
                 url              : { it.url },
                 username         : { it.username },
                 password         : { it.password },
@@ -168,7 +176,8 @@ Optional Args:
         }
         expectedFileContent = [
                 "target/test-classes/diffChangeLog-test.xml" : [CommandTests.assertContains("<changeSet ", 5),
-                                                                CommandTests.assertContains("<dropTable ", 1)]
+                                                                CommandTests.assertContains("<dropTable ", 1),
+                                                                CommandTests.assertContains("author=\"Test Author\"", 5)]
         ]
     }
 

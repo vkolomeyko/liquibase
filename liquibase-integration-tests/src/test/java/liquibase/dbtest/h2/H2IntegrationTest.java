@@ -1,7 +1,11 @@
 package liquibase.dbtest.h2;
 
+import static org.junit.Assert.fail;
+import static org.junit.Assume.assumeNotNull;
+
 import liquibase.Liquibase;
 import liquibase.Scope;
+import liquibase.change.Change;
 import liquibase.database.DatabaseFactory;
 import liquibase.database.jvm.JdbcConnection;
 import liquibase.dbtest.AbstractIntegrationTest;
@@ -11,7 +15,10 @@ import liquibase.diff.compare.CompareControl;
 import liquibase.diff.output.DiffOutputControl;
 import liquibase.diff.output.changelog.DiffToChangeLog;
 import liquibase.diff.output.report.DiffToReport;
+import liquibase.exception.DatabaseException;
+import liquibase.exception.PreconditionFailedException;
 import liquibase.exception.ValidationFailedException;
+import liquibase.executor.Executor;
 import liquibase.executor.ExecutorService;
 import liquibase.statement.core.RawSqlStatement;
 import org.junit.Assert;
@@ -187,6 +194,53 @@ public class H2IntegrationTest extends AbstractIntegrationTest {
                 .queryForList(new RawSqlStatement(String.format("select * from %s", tableName)));
         Assert.assertEquals("Rollbacking for " + insertedValue, 2, queryResult.size());
         Assert.assertEquals(insertedValue.toString(), queryResult.get(1).get(colName));
+    }
+
+    @Test
+    public void makeSureDbmsFilteredChangeIsNotDeployed() throws Exception {
+        clearDatabase();
+        runUpdate("changelogs/h2/complete/sql.change.dbms.filtered.should.not.be.deployed.changelog.xml");
+
+        try {
+            Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", getDatabase())
+                    .queryForList(new RawSqlStatement("select * from oraculo"));
+        }
+        catch (DatabaseException e) {
+            Assert.assertTrue(e.getMessage().contains("Table \"ORACULO\" not found"));
+        }
+        try {
+            Scope.getCurrentScope().getSingleton(ExecutorService.class).getExecutor("jdbc", getDatabase())
+                    .queryForList(new RawSqlStatement("select * from anydb"));
+        }
+        catch (DatabaseException e) {
+            Assert.assertTrue(e.getMessage().contains("Table \"ANYDB\" not found"));
+        }
+    }
+
+    /**
+     * Verifies that the {@link Executor#execute(Change)} method is called by testing an Executor implementation
+     * that uses a separate database connection and commits after each change completes.
+     *
+     * @throws Exception
+     */
+    @Test
+    public void testCustomExecutorInvokedPerChange() throws Exception {
+        assumeNotNull(this.getDatabase());
+        final String changeLogFile = "changelogs/common/runWith.executor.changelog.xml";
+        try {
+            Liquibase liquibase = createLiquibase(changeLogFile);
+            liquibase.update();
+        } catch (Exception e) {
+            // ok - expect a failure to prove that the changes earlier in the change set committed
+        }
+
+        // Confirm the number of expected rows were inserted into the table in the alt schema by running the changelog again to get to the precondition checks
+        try {
+            Liquibase liquibase = createLiquibase(changeLogFile);
+            liquibase.update();
+        } catch (PreconditionFailedException e) {
+            fail(e.getFailedPreconditions().get(0).getMessage());
+        }
     }
 
     @Override

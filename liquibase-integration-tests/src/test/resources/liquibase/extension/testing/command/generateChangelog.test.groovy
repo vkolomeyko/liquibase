@@ -1,5 +1,7 @@
 package liquibase.extension.testing.command
 
+import static java.util.ResourceBundle.getBundle
+
 import liquibase.change.ColumnConfig
 import liquibase.change.ConstraintsConfig
 import liquibase.change.core.AddForeignKeyConstraintChange
@@ -19,7 +21,11 @@ Required Args:
   url (String) The JDBC database connection URL
     OBFUSCATED
 Optional Args:
+  author (String) Specifies the author for changesets in the generated changelog
+    Default: null
   changelogFile (String) Changelog file to write results
+    Default: null
+  contextFilter (String) Changeset contexts to generate
     Default: null
   dataOutputDirectory (String) Directory to write table data to
     Default: null
@@ -43,6 +49,8 @@ Optional Args:
     Default: false
   includeTablespace (Boolean) Include the tablespace attribute in the changelog. Defaults to false.
     Default: false
+  labelFilter (String) Changeset labels to generate
+    Default: null
   outputSchemas (String) Output schemas names. This is a CSV list.
     Default: null
   overwriteOutputFile (Boolean) Flag to allow overwriting of output changelog file. Default: false
@@ -50,8 +58,16 @@ Optional Args:
   password (String) Password to use to connect to the database
     Default: null
     OBFUSCATED
+  replaceIfExistsTypes (String) Sets replaceIfExists="true" for changes of these types (supported types: createProcedure, createView)
+    Default: none
+  runOnChangeTypes (String) Sets runOnChange="true" for changesets containing solely changes of these types (e. g. createView, createProcedure, ...).
+    Default: none
   schemas (String) Schemas to include in diff
     Default: null
+  skipObjectSorting (Boolean) When true will skip object sorting. This can be useful on databases that have a lot of packages/procedures that are linked to each other
+    Default: false
+  useOrReplaceOption (Boolean) If true, will add 'OR REPLACE' option to the create view change object
+    Default: false
   username (String) Username to use to connect to the database
     Default: null
 """
@@ -152,7 +168,7 @@ Optional Args:
             cleanResources("changelog-test.xml")
         }
         expectedException = CommandValidationException.class
-        expectedExceptionMessage = "Output ChangeLogFile 'target/test-classes/changelog-test.xml' already exists!"
+        expectedExceptionMessage = getBundle("liquibase/i18n/liquibase-core").getString("changelogfile.already.exists").replace("%s", "target/test-classes/changelog-test.xml")
     }
 
     run "Filtering with includeObjects", {

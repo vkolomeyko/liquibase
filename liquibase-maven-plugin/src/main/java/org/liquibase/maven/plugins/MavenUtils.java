@@ -27,7 +27,7 @@ public class MavenUtils {
 
     /**
      * Obtains a {@link ClassLoader} that can load from the Maven project dependencies. If
-     * the dependencies have not be resolved (or there are none) then this will just end up
+     * the dependencies have not been resolved (or there are none) then this will just end up
      * delegating to the parent {@link ClassLoader} of this class.
      *
      * @return The ClassLoader that can load the resolved dependencies for the Maven
@@ -104,16 +104,6 @@ public class MavenUtils {
         } else {
             addFile(urls, f, log, verbose);
         }
-//    if (f != null) {
-//      URL fileURL = f.toURI().toURL();
-//      if (verbose) {
-//        log.info("  artifact: " + fileURL);
-//      }
-//      urls.add(fileURL);
-//    } else {
-//      log.warning("Artifact with no actual file, '" + artifact.getGroupId()
-//               + ":" + artifact.getArtifactId() + "'");
-//    }
     }
 
     private static void addFile(Set<URI> urls, File f, Log log, boolean verbose)

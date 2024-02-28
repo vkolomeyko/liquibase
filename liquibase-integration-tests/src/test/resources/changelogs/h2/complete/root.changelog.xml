@@ -403,5 +403,20 @@
         <preConditions onFail="MARK_RAN"><tableExists tableName="NOT_EXISTENT_TABLE"/></preConditions>
         <dropTable tableName="NOT_EXISTENT_TABLE_DOESNT_MATTER"/>
     </changeSet>
+    <changeSet id="addAutoIncrementColumnWithCustomValue" author="mallod">
+        <createTable tableName="autoIncrementColumnStartingWithCustomValueTest">
+            <column name="id" type="BIGINT" autoIncrement="true" startWith="100"/>
+            <column name="name" type="int"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="parametarizedBooleanTest" author="mallod">
+        <createTable tableName="BooleanTestTaBle">
+            <column name="id" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="booleanFlag" type="boolean(1)"/>
+        </createTable>
+    </changeSet>
 
 </databaseChangeLog>

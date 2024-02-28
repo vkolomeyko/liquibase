@@ -1,3 +1,4 @@
+<!-- include all this in the tar file -->
 <component>
 	<fileSets>
 		<fileSet>
@@ -39,7 +40,7 @@
 			</includes>
 		</fileSet>
 		<fileSet>
-			<directory>${project.basedir}/../liquibase-core/target/classes/liquibase/examples</directory>
+			<directory>${project.basedir}/../liquibase-standard/target/classes/liquibase/examples</directory>
 			<outputDirectory>examples</outputDirectory>
 			<includes>
 				<include>**/*</include>
@@ -49,7 +50,7 @@
             </excludes>
         </fileSet>
         <fileSet>
-            <directory>${project.basedir}/../liquibase-core/target/classes/liquibase/examples</directory>
+            <directory>${project.basedir}/../liquibase-standard/target/classes/liquibase/examples</directory>
             <outputDirectory>examples</outputDirectory>
             <includes>
                 <include>**/start-h2</include>
@@ -58,7 +59,7 @@
             <fileMode>0755</fileMode>
         </fileSet>
         <fileSet>
-            <directory>${project.basedir}/../liquibase-core/target/classes/liquibase/examples</directory>
+            <directory>${project.basedir}/../liquibase-standard/target/classes/liquibase/examples</directory>
             <outputDirectory>examples</outputDirectory>
             <includes>
                 <include>**/start-h2.bat</include>
@@ -67,11 +68,6 @@
 		</fileSet>
 	</fileSets>
 	<files>
-        <file>
-            <source>${project.build.directory}/liquibase-${project.version}.jar</source>
-            <destName>internal/lib/liquibase-core.jar</destName>
-            <fileMode>0644</fileMode>
-        </file>
 		<!-- specifying the outputDirectory as file.separator puts it in the root -->
 		<file>
 			<source>../LICENSE.txt</source>
@@ -93,6 +89,7 @@
             <useTransitiveFiltering>true</useTransitiveFiltering>
             <scope>runtime</scope>
 			<includes>
+				<include>org.liquibase:liquibase-core:</include>
 				<include>org.liquibase:liquibase-commercial:</include>
                 <include>com.opencsv:opencsv:</include>
 				<include>org.yaml:snakeyaml:jar:</include>
@@ -118,6 +115,7 @@
 
             <!-- some libraries lie about compile vs. runtime dependencies. Or we don't hit code that uses these. So exclude them manually. -->
             <excludes>
+                <exclude>org.slf4j:slf4j-api:jar:</exclude> <!-- from sqlite-jdbc -->
                 <exclude>org.antlr:antlr4-runtime:jar:</exclude>  <!-- from connector-api -->
                 <exclude>org.checkerframework:checker-qual:jar:</exclude> <!-- from postgresql -->
                 <exclude>commons-beanutils:commons-beanutils:jar:</exclude> <!-- from opencsv -->
@@ -128,13 +126,19 @@
                 <exclude>jakarta.xml.bind:jakarta.xml.bind-api:jar:</exclude> <!-- from jaxb-runtime -->
                 <exclude>com.sun.activation:jakarta.activation:jar:</exclude> <!-- from jaxb-runtime -->
                 <exclude>javax.activation:javax.activation-api:jar:</exclude> <!-- from jaxb-api -->
-				<exclude>org.liquibase:liquibase-snowflake:jar:</exclude> <!-- from liquibase-commercial -->
+				<exclude>org.liquibase:liquibase-snowflake:jar:</exclude> <!-- from liquibase-core -->
+				<exclude>org.liquibase:liquibase-cli:jar:</exclude> <!-- from liquibase-core  -->
+				<exclude>org.liquibase:liquibase-standard:jar:</exclude> <!-- from liquibase-standard  -->
 				<exclude>net.java.truelicense:*:jar:</exclude> <!-- from liquibase-commercial -->
 				<exclude>com.github.jsqlparser:jsqlparser:jar:</exclude> <!-- from liquibase-commercial -->
+				<exclude>org.mvel:mvel2:jar:</exclude> <!-- from liquibase-commercial -->
 				<exclude>commons-codec:commons-codec:jar:</exclude> <!-- from liquibase-commercial -->
 				<exclude>com.fasterxml.jackson.core:*:jar:</exclude> <!-- from liquibase-commercial -->
 				<exclude>com.fasterxml.jackson.module:*:jar:</exclude> <!-- from liquibase-commercial -->
-            </excludes>
+				<exclude>com.github.spullara.mustache.java:compiler:jar:</exclude> <!-- from liquibase-commercial -->
+				<exclude>io.github.java-diff-utils:java-diff-utils:jar:</exclude> <!-- from liquibase-commercial -->
+				<exclude>com.github.vertical-blank:sql-formatter:jar:</exclude> <!-- from liquibase-commercial -->
+			</excludes>
 		</dependencySet>
 	</dependencySets>
 </component>
